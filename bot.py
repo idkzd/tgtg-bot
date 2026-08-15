@@ -821,7 +821,7 @@ def _start_health_server():
 
     srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    print(f"healthcheck on :{port}")
+    print(f"healthcheck on :{port}", flush=True)
 
 
 def main():
@@ -856,7 +856,7 @@ def main():
         logging.getLogger(__name__).warning("poll error: %s", context.error)
 
     app.add_error_handler(on_error)
-    print("bot started.")
+    print("bot started.", flush=True)
     app.run_polling(drop_pending_updates=True)
 
 

@@ -6,6 +6,9 @@ Render would put it to sleep. This module starts a background thread that
 periodically requests the service's own public URL; the request loops back
 through Render's load balancer, which resets the idle timer.
 
+Every ping is logged (flushed immediately) so the Render app logs prove the
+keep-alive is alive — grep for "keep_alive".
+
 Env (Render injects these):
   RENDER_EXTERNAL_URL  public URL, e.g. https://<service>.onrender.com
   PORT                 local healthcheck port (fallback only — a localhost
@@ -27,14 +30,16 @@ def _ping(url):
     try:
         with urllib.request.urlopen(url, timeout=15) as r:
             return r.status == 200
-    except Exception:
+    except Exception as e:
+        print(f"[keep_alive] ping failed: {e}", flush=True)
         return False
 
 
 def _loop(url, interval):
     while True:
         # ping first, then sleep — so a fresh deploy counts immediately
-        _ping(url)
+        ok = _ping(url)
+        print(f"[keep_alive] ping {'ok' if ok else 'FAILED'} -> {url}", flush=True)
         time.sleep(interval)
 
 
@@ -59,6 +64,7 @@ def start():
         pass
     interval = max(10, min(interval, MAX_INTERVAL))
 
+    print(f"[keep_alive] started, interval={interval}s, url={url}", flush=True)
     t = threading.Thread(target=_loop, args=(url, interval), daemon=True)
     t.start()
     return t
