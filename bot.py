@@ -54,7 +54,8 @@ SORTS = {"rating": "⭐ рейтинг", "reviews": "💬 отзывы",
          "distance": "📍 ближе", "value": "⚖️ ценность"}
 SORT_CB = {"rating": "sort:rating", "reviews": "sort:reviews",
            "distance": "sort:distance", "value": "sort:value"}
-LIMIT = 8
+PAGE_SIZE = 8
+RADIUS_FETCH = 200  # how many stores the radius query pulls in before paging
 CHAIN_TTL_S = int(os.environ.get("TGTG_CHAIN_TTL_S", "1800"))  # cache freshness
 COMMON_CHAINS = ["HOFER", "SPAR", "BIPA", "Anker", "INTERSPAR", "EUROSPAR",
                  "Denns BioMarkt", "Ströck", "Felber", "Aida", "Tchibo", "Starbucks"]
@@ -208,10 +209,18 @@ def watches_keyboard(db, chat_id):
     return InlineKeyboardMarkup(rows)
 
 
-def result_keyboard(items):
+def page_keyboard(items, page, pages):
     rows = [[InlineKeyboardButton(f"🔔 {it['store_name'][:28]}",
                                   callback_data=f"watch:{it['item_id']}")]
             for it in items]
+    if pages > 1:
+        prev_cb = f"page:{page - 1}" if page > 0 else "noop"
+        next_cb = f"page:{page + 1}" if page < pages - 1 else "noop"
+        rows.append([
+            InlineKeyboardButton("⬅️", callback_data=prev_cb),
+            InlineKeyboardButton(f"{page + 1}/{pages}", callback_data="noop"),
+            InlineKeyboardButton("➡️", callback_data=next_cb),
+        ])
     rows.append([InlineKeyboardButton("🔄", callback_data="refresh"),
                  InlineKeyboardButton("⚙️", callback_data="settings"),
                  InlineKeyboardButton("◀️ Меню", callback_data="menu")])
@@ -265,7 +274,7 @@ def fmt_line(it, minutes=None, origin_label=None):
 
 
 def enrich_and_sort(rows, p, db, chat_id, ud):
-    """Add km/minutes/value to each row, resolve origin, sort, cap."""
+    """Add km/minutes/value to each row, resolve origin, filter, sort."""
     origin_label, olat, olon = resolve_origin(db, chat_id, ud)
     enriched = []
     for r in rows:
@@ -306,7 +315,7 @@ def enrich_and_sort(rows, p, db, chat_id, ud):
                                      -(r.get("rating") or 0)))
     elif p["sort"] == "value":
         enriched.sort(key=lambda r: (-(r.get("value") or 0)))
-    return enriched[:LIMIT], origin_label
+    return enriched, origin_label
 
 
 _geo_ctx = {}
@@ -321,16 +330,38 @@ def geo_travel_minutes(olat, olon, dlat, dlon, travel="driving"):
 
 
 async def send_result(chat_id, context, items, origin_label, header):
+    if not items:
+        await context.bot.send_message(
+            chat_id, "По заданным фильтрам ничего не нашлось. Ослабь фильтры в ⚙️.")
+        return
+    ud = context.user_data
+    ud["page_items"] = items
+    ud["page_header"] = header
+    ud["page_origin"] = origin_label
+    await render_page(chat_id, context, 0)
+
+
+async def render_page(chat_id, context, page, message=None):
+    ud = context.user_data
+    items = ud.get("page_items") or []
+    header = ud.get("page_header", "")
+    origin = ud.get("page_origin")
+    total = len(items)
+    pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    ud["page_idx"] = page
+    chunk = items[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
     text = [esc(header)]
-    for it in items:
-        text.append(fmt_line(it, minutes=it.get("minutes"), origin_label=origin_label))
+    for it in chunk:
+        text.append(fmt_line(it, minutes=it.get("minutes"), origin_label=origin))
         text.append("")
-    kb = result_keyboard(items)
-    try:
+    text.append(f"📄 Страница {page + 1} из {pages} · всего {total} шт.")
+    kb = page_keyboard(chunk, page, pages)
+    if message is None:
         await context.bot.send_message(chat_id, "\n".join(text), reply_markup=kb,
                                        parse_mode="HTML")
-    except Exception as e:  # message too long etc.
-        await context.bot.send_message(chat_id, f"⚠️ {e}")
+    else:
+        await message.edit_text("\n".join(text), reply_markup=kb, parse_mode="HTML")
 
 
 def filter_str(p):
@@ -361,7 +392,7 @@ async def run_radius(chat_id, context, message=None, edit_msg=None):
     try:
         raw = await asyncio.to_thread(
             client(context).top_stores, olat, olon, p["radius"], p["sort"], p["minrev"],
-            LIMIT * 4, with_stock_only=p["stock_only"])
+            RADIUS_FETCH, with_stock_only=p["stock_only"])
     except Exception as e:
         await context.bot.send_message(chat_id, f"⚠️ Ошибка запроса: {e}")
         return
@@ -457,7 +488,7 @@ async def send_chain_result(chat_id, query, context):
     when = "—"
     if ts:
         when = time.strftime("%H:%M", time.localtime(float(ts)))
-    header = (f"🏪 «{query}» по всей Вене ({len(rows)} шт.) · данные {when} · "
+    header = (f"🏪 «{query}» по всей Вене ({len(items)} шт.) · данные {when} · "
               f"{SORTS[p['sort']]}{filter_str(p)}"
               f" · {TRAVEL_LABELS[p['travel']]} {TRAVEL_NAMES[p['travel']]}"
               f"{' · от ' + origin_label if origin_label else ''}")
@@ -475,6 +506,11 @@ async def add_watch_cb(update, context):
     if row is None:
         ud = context.user_data
         row = (ud.get("last_items") or {}).get(item_id)
+        if row is None:
+            for it in (ud.get("page_items") or []):
+                if str(it.get("item_id")) == str(item_id):
+                    row = it
+                    break
     if row is None:
         await q.message.reply_text("Не нашёл магазин — обнови список (🔄).")
         return
@@ -702,6 +738,11 @@ async def on_button(update, context):
     if data.startswith("origin:"):
         ud["origin"] = data.split(":", 1)[1]
         await settings_save_and_show(q, context, ud, chat_id, db)
+        return
+    if data == "noop":
+        return
+    if data.startswith("page:"):
+        await render_page(chat_id, context, int(data.split(":", 1)[1]), message=q.message)
         return
     if data == "refresh":
         view = ud.get("view")
