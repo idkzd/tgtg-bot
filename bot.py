@@ -35,6 +35,7 @@ from telegram.ext import (
 from db import DB
 from geo import (Geo, TRAVEL_LABELS, estimate_minutes, haversine_km,
                   value_score)
+import keep_alive
 import wl
 from tgtg_client import TgtgClient
 
@@ -828,6 +829,7 @@ def main():
         raise SystemExit("Set TGTG_BOT_TOKEN (or put it in .env) — create a bot via @BotFather.")
     if os.environ.get("PORT"):  # Railway/cloud: keep the healthcheck alive
         _start_health_server()
+    keep_alive.start()  # self-ping so Render's free tier never sleeps
     app = (ApplicationBuilder().token(TOKEN)
            .get_updates_read_timeout(20)
            .get_updates_connect_timeout(15)
