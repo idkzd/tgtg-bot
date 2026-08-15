@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: tgtg-bot
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    healthCheckPath: /health
+    envVars:
+      - key: TGTG_BOT_TOKEN
+        sync: false
+      - key: TGTG_SESSION_JSON
+        sync: false
