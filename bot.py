@@ -884,24 +884,16 @@ def _startup_diag():
             print("[startup] ERROR: no TGTG session — bot will start but search will fail", flush=True)
             return
         c = TgtgClient()
-        # Drop the stale datadome cookie (tied to original login IP),
-        # refresh token (gets new datadome for this IP), then search.
-        old_dd = bool(c._datadome)
+        # Don't send any datadome cookie — it's tied to a different IP.
+        # TGTG issues a fresh one on first request.
         c.session.pop("datadome", None)
-        print(f"[startup] Dropped datadome (was present={old_dd}), refreshing token from Render IP…", flush=True)
-        ok = c.refresh()
-        new_dd = c._datadome
-        print(f"[startup] Token refresh: {'OK' if ok else 'FAILED'}, new datadome={'yes' if new_dd else 'no'}", flush=True)
-        if not ok:
-            print("[startup] Datadome blocks Render entirely — proxy needed.", flush=True)
-            return
-        print("[startup] Testing search around Stephansplatz…", flush=True)
+        print("[startup] Testing TGTG search from datacenter IP (no cookie)…", flush=True)
         items = c.top_stores(48.2082, 16.3738, 3.0, sort_by="rating", limit=3)
         print(f"[startup] TGTG search OK — found {len(items)} stores", flush=True)
         for it in items:
             print(f"[startup]   ⭐ {it.get('rating','?')} | {it['store_name']} | in_stock={it.get('in_stock')} | {it.get('distance_km','?')}km", flush=True)
     except Exception as e:
-        print(f"[startup] TGTG test FAILED: {e}", flush=True)
+        print(f"[startup] TGTG search FAILED: {e}", flush=True)
 
 
 def main():

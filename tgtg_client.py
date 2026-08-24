@@ -109,7 +109,8 @@ class TgtgClient:
         for k, v in HEADERS_BASE.items():
             req.add_header(k, v)
         req.add_header("x-correlation-id", str(uuid.uuid4()))
-        req.add_header("cookie", "datadome=" + self._datadome)
+        if self._datadome:
+            req.add_header("cookie", "datadome=" + self._datadome)
         if self.access_token:
             req.add_header("authorization", "Bearer " + self.access_token)
 
