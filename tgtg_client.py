@@ -41,7 +41,8 @@ class TgtgClient:
     def __init__(self, session_path=DEFAULT_SESSION, proxy=None):
         self.session_path = session_path
         self.proxy = proxy or os.environ.get("TGTG_PROXY")  # e.g. http://127.0.0.1:8080
-        self._refreshing = False  # guard against recursive 401→refresh→401 loops
+        self._refreshing = False      # guard against recursive 401→refresh→401 loops
+        self._dd_retrying = False     # guard against recursive datadome retries
         self._load()
 
     # ---- session persistence -------------------------------------------
@@ -131,6 +132,7 @@ class TgtgClient:
             status = e.code
             raw = e.read()
         text = raw.decode("utf-8", "replace")
+
         if status == 401 and not self._refreshing:
             # token expired mid-flight -> refresh once and retry
             if self.refresh():
@@ -138,7 +140,28 @@ class TgtgClient:
             raise TgtgError(f"401 on {path} and refresh failed")
         if status not in (200, 202):
             raise TgtgError(f"{path} -> HTTP {status}: {text[:300]}")
-        return json.loads(text) if text.strip() else {}
+
+        # Parse JSON; if it fails (Datadome served an HTML challenge page),
+        # clear the stale cookie and retry once — TGTG will issue a new one
+        # tied to the current IP.
+        try:
+            return json.loads(text) if text.strip() else {}
+        except json.JSONDecodeError:
+            if self._dd_retrying or not self._datadome:
+                raise TgtgError(
+                    f"TGTG returned non-JSON response (likely Datadome block). "
+                    f"First 120 chars: {text[:120]}")
+            # stale datadome cookie → drop it and let the API set a new one
+            self.session.pop("datadome", None)
+            try:
+                self._save()
+            except OSError:
+                pass
+            self._dd_retrying = True
+            try:
+                return self._post(path, body)
+            finally:
+                self._dd_retrying = False
 
     # ---- auth ----------------------------------------------------------
     def refresh(self):
