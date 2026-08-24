@@ -49,6 +49,9 @@ if os.path.exists(os.path.join(os.path.dirname(__file__), ".env")):
 
 TOKEN = os.environ.get("TGTG_BOT_TOKEN", "")
 
+log = logging.getLogger("tgtg_bot")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
+
 RADII = [1.0, 3.0, 5.0, 10.0]
 SORTS = {"rating": "⭐ рейтинг", "reviews": "💬 отзывы",
          "distance": "📍 ближе", "value": "⚖️ ценность"}
@@ -394,6 +397,8 @@ async def run_radius(chat_id, context, message=None, edit_msg=None):
             client(context).top_stores, olat, olon, p["radius"], p["sort"], p["minrev"],
             RADIUS_FETCH, with_stock_only=p["stock_only"])
     except Exception as e:
+        log.error("TGTG search failed chat=%s radius=%.0fkm at %.4f,%.4f: %s",
+                  chat_id, p["radius"], olat, olon, e)
         await context.bot.send_message(chat_id, f"⚠️ Ошибка запроса: {e}")
         return
     if not raw:
@@ -579,6 +584,8 @@ async def on_location(update, context):
     loc = update.message.location
     ud = context.user_data
     chat_id = update.effective_chat.id
+    log.info("location from chat=%s user=@%s lat=%.5f lon=%.5f",
+             chat_id, update.effective_chat.username or "?", loc.latitude, loc.longitude)
     db = get_db()
     pending = ud.get("pending")
     if pending == "set_home":
