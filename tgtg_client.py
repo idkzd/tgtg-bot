@@ -143,6 +143,7 @@ class TgtgClient:
         # tied to a different IP. Drop it and retry — TGTG issues a fresh
         # one bound to the current IP.
         if status == 403 and not self._dd_retrying:
+            print(f"[tgtg] Datadome 403 on {path}, dropping cookie and retrying without it…", flush=True)
             self.session.pop("datadome", None)
             try:
                 self._save()
@@ -150,7 +151,13 @@ class TgtgClient:
                 pass
             self._dd_retrying = True
             try:
-                return self._post(path, body)
+                print(f"[tgtg] Retry {path} without datadome…", flush=True)
+                result = self._post(path, body)
+                print(f"[tgtg] Retry SUCCESS on {path}", flush=True)
+                return result
+            except Exception as e:
+                print(f"[tgtg] Retry FAILED on {path}: {e}", flush=True)
+                raise
             finally:
                 self._dd_retrying = False
 
