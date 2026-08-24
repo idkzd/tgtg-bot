@@ -884,16 +884,21 @@ def _startup_diag():
             print("[startup] ERROR: no TGTG session — bot will start but search will fail", flush=True)
             return
         c = TgtgClient()
-        print(f"[startup] TGTG session loaded ok. Checking token…", flush=True)
-        c.ensure_token()
-        print("[startup] TGTG token ready. Doing test search…", flush=True)
-        # Live test: search around Stephansplatz (Vienna center)
+        print(f"[startup] TGTG session loaded ok. Testing refresh endpoint…", flush=True)
+        # Step 1: test if refresh endpoint works from Render IP
+        ok = c.refresh()
+        print(f"[startup] TGTG refresh: {'OK' if ok else 'FAILED (Datadome blocks even refresh?)'}", flush=True)
+        if not ok:
+            print("[startup] Datadome blocks Render entirely — proxy needed.", flush=True)
+            return
+        # Step 2: test search
+        print("[startup] TGTG refresh OK. Testing search around Stephansplatz…", flush=True)
         items = c.top_stores(48.2082, 16.3738, 3.0, sort_by="rating", limit=3)
-        print(f"[startup] TGTG search OK — found {len(items)} stores near Stephansplatz", flush=True)
+        print(f"[startup] TGTG search OK — found {len(items)} stores", flush=True)
         for it in items:
             print(f"[startup]   ⭐ {it.get('rating','?')} | {it['store_name']} | in_stock={it.get('in_stock')} | {it.get('distance_km','?')}km", flush=True)
     except Exception as e:
-        print(f"[startup] TGTG search FAILED: {e}", flush=True)
+        print(f"[startup] TGTG test FAILED: {e}", flush=True)
 
 
 def main():
