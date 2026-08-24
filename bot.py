@@ -51,6 +51,7 @@ TOKEN = os.environ.get("TGTG_BOT_TOKEN", "")
 
 log = logging.getLogger("tgtg_bot")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # don't leak bot token in URLs
 
 RADII = [1.0, 3.0, 5.0, 10.0]
 SORTS = {"rating": "⭐ рейтинг", "reviews": "💬 отзывы",
@@ -885,10 +886,14 @@ def _startup_diag():
         c = TgtgClient()
         print(f"[startup] TGTG session loaded ok. Checking token…", flush=True)
         c.ensure_token()
-        print("[startup] TGTG token ready.", flush=True)
+        print("[startup] TGTG token ready. Doing test search…", flush=True)
+        # Live test: search around Stephansplatz (Vienna center)
+        items = c.top_stores(48.2082, 16.3738, 3.0, sort_by="rating", limit=3)
+        print(f"[startup] TGTG search OK — found {len(items)} stores near Stephansplatz", flush=True)
+        for it in items:
+            print(f"[startup]   ⭐ {it.get('rating','?')} | {it['store_name']} | in_stock={it.get('in_stock')} | {it.get('distance_km','?')}km", flush=True)
     except Exception as e:
-        print(f"[startup] TGTG session WARNING: {e}", flush=True)
-        print("[startup] Bot will start, but TGTG searches may fail — check session validity.", flush=True)
+        print(f"[startup] TGTG search FAILED: {e}", flush=True)
 
 
 def main():
