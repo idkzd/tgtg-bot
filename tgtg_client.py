@@ -41,6 +41,7 @@ class TgtgClient:
     def __init__(self, session_path=DEFAULT_SESSION, proxy=None):
         self.session_path = session_path
         self.proxy = proxy or os.environ.get("TGTG_PROXY")  # e.g. http://127.0.0.1:8080
+        self._refreshing = False  # guard against recursive 401→refresh→401 loops
         self._load()
 
     # ---- session persistence -------------------------------------------
@@ -50,14 +51,26 @@ class TgtgClient:
         # refreshes persist for the lifetime of the container.
         env_json = os.environ.get("TGTG_SESSION_JSON")
         if env_json:
-            self.session = json.loads(env_json)
+            try:
+                self.session = json.loads(env_json)
+            except json.JSONDecodeError as e:
+                raise TgtgError(f"TGTG_SESSION_JSON is not valid JSON: {e}")
             try:
                 self._save()
             except OSError:
                 pass
             return
-        with open(self.session_path) as f:
-            self.session = json.load(f)
+        try:
+            with open(self.session_path) as f:
+                self.session = json.load(f)
+        except FileNotFoundError:
+            raise TgtgError(
+                f"No session found: neither TGTG_SESSION_JSON env var nor "
+                f"{self.session_path} exists. Copy session.json contents to "
+                f"TGTG_SESSION_JSON env var on Render."
+            )
+        except json.JSONDecodeError as e:
+            raise TgtgError(f"{self.session_path} is not valid JSON: {e}")
 
     def _save(self):
         tmp = self.session_path + ".tmp"
@@ -118,7 +131,7 @@ class TgtgClient:
             status = e.code
             raw = e.read()
         text = raw.decode("utf-8", "replace")
-        if status == 401:
+        if status == 401 and not self._refreshing:
             # token expired mid-flight -> refresh once and retry
             if self.refresh():
                 return self._post(path, body)
@@ -133,10 +146,15 @@ class TgtgClient:
         rt = self.session.get("refresh_token")
         if not rt:
             return False
+        # Prevent recursive refresh: if _post gets a 401 on the refresh call
+        # itself, don't try to refresh again (that would loop forever).
+        self._refreshing = True
         try:
             out = self._post("/api/token/v1/refresh", {"refresh_token": rt})
         except TgtgError:
             return False
+        finally:
+            self._refreshing = False
         if not out.get("access_token"):
             return False
         self.session["access_token"] = out["access_token"]

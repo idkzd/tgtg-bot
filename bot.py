@@ -865,9 +865,29 @@ def _start_health_server():
     print(f"healthcheck on :{port}", flush=True)
 
 
+def _startup_diag():
+    """Log TGTG session status at startup so Render logs show what's wrong."""
+    try:
+        from tgtg_client import TgtgClient, DEFAULT_SESSION
+        env = os.environ.get("TGTG_SESSION_JSON")
+        file_ok = os.path.exists(DEFAULT_SESSION)
+        print(f"[startup] TGTG session: env={'set' if env else 'not set'}, file={'found' if file_ok else 'missing'}", flush=True)
+        if not env and not file_ok:
+            print("[startup] ERROR: no TGTG session — bot will start but search will fail", flush=True)
+            return
+        c = TgtgClient()
+        print(f"[startup] TGTG session loaded ok. Checking token…", flush=True)
+        c.ensure_token()
+        print("[startup] TGTG token ready.", flush=True)
+    except Exception as e:
+        print(f"[startup] TGTG session WARNING: {e}", flush=True)
+        print("[startup] Bot will start, but TGTG searches may fail — check session validity.", flush=True)
+
+
 def main():
     if not TOKEN:
         raise SystemExit("Set TGTG_BOT_TOKEN (or put it in .env) — create a bot via @BotFather.")
+    _startup_diag()  # log TGTG session status for Render debugging
     if os.environ.get("PORT"):  # Railway/cloud: keep the healthcheck alive
         _start_health_server()
     keep_alive.start()  # self-ping so Render's free tier never sleeps
