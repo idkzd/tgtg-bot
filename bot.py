@@ -884,15 +884,18 @@ def _startup_diag():
             print("[startup] ERROR: no TGTG session — bot will start but search will fail", flush=True)
             return
         c = TgtgClient()
-        print(f"[startup] TGTG session loaded ok. Testing refresh endpoint…", flush=True)
-        # Step 1: test if refresh endpoint works from Render IP
+        # Drop the stale datadome cookie (tied to original login IP),
+        # refresh token (gets new datadome for this IP), then search.
+        old_dd = bool(c._datadome)
+        c.session.pop("datadome", None)
+        print(f"[startup] Dropped datadome (was present={old_dd}), refreshing token from Render IP…", flush=True)
         ok = c.refresh()
-        print(f"[startup] TGTG refresh: {'OK' if ok else 'FAILED (Datadome blocks even refresh?)'}", flush=True)
+        new_dd = c._datadome
+        print(f"[startup] Token refresh: {'OK' if ok else 'FAILED'}, new datadome={'yes' if new_dd else 'no'}", flush=True)
         if not ok:
             print("[startup] Datadome blocks Render entirely — proxy needed.", flush=True)
             return
-        # Step 2: test search
-        print("[startup] TGTG refresh OK. Testing search around Stephansplatz…", flush=True)
+        print("[startup] Testing search around Stephansplatz…", flush=True)
         items = c.top_stores(48.2082, 16.3738, 3.0, sort_by="rating", limit=3)
         print(f"[startup] TGTG search OK — found {len(items)} stores", flush=True)
         for it in items:
