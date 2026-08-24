@@ -138,12 +138,27 @@ class TgtgClient:
             if self.refresh():
                 return self._post(path, body)
             raise TgtgError(f"401 on {path} and refresh failed")
+
+        # Datadome blocks with 403 + HTML challenge when the cookie is
+        # tied to a different IP. Drop it and retry — TGTG issues a fresh
+        # one bound to the current IP.
+        if status == 403 and not self._dd_retrying:
+            self.session.pop("datadome", None)
+            try:
+                self._save()
+            except OSError:
+                pass
+            self._dd_retrying = True
+            try:
+                return self._post(path, body)
+            finally:
+                self._dd_retrying = False
+
         if status not in (200, 202):
             raise TgtgError(f"{path} -> HTTP {status}: {text[:300]}")
 
         # Parse JSON; if it fails (Datadome served an HTML challenge page),
-        # clear the stale cookie and retry once — TGTG will issue a new one
-        # tied to the current IP.
+        # clear the stale cookie and retry once.
         try:
             return json.loads(text) if text.strip() else {}
         except json.JSONDecodeError:
@@ -151,7 +166,6 @@ class TgtgClient:
                 raise TgtgError(
                     f"TGTG returned non-JSON response (likely Datadome block). "
                     f"First 120 chars: {text[:120]}")
-            # stale datadome cookie → drop it and let the API set a new one
             self.session.pop("datadome", None)
             try:
                 self._save()
